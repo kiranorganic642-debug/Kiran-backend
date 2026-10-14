@@ -10,13 +10,6 @@ router.get('/orders', protect, admin, (req, res) => {
   res.json({ message: 'Welcome Admin - Orders List' });
 });
 
-// @desc    Get all products (Sample)
-// @route   GET /api/admin/products
-// @access  Private/Admin
-router.get('/products', protect, admin, (req, res) => {
-  res.json({ message: 'Welcome Admin - Products List' });
-});
-
 // @desc    Get all users (Sample)
 // @route   GET /api/admin/users
 // @access  Private/Admin

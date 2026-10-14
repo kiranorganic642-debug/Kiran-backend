@@ -11,6 +11,8 @@ const userSchema = mongoose.Schema(
       type: String,
       required: true,
       unique: true,
+      lowercase: true,
+      trim: true,
     },
     password: {
       type: String,
@@ -20,6 +22,11 @@ const userSchema = mongoose.Schema(
       type: String,
       enum: ['admin', 'user'],
       default: 'user',
+    },
+    status: {
+      type: String,
+      enum: ['active', 'blocked'],
+      default: 'active',
     },
   },
   {
@@ -33,9 +40,9 @@ userSchema.methods.matchPassword = async function (enteredPassword) {
 };
 
 // Encrypt password using bcrypt
-userSchema.pre('save', async function (next) {
+userSchema.pre('save', async function () {
   if (!this.isModified('password')) {
-    return next();
+    return;
   }
 
   const salt = await bcrypt.genSalt(10);
