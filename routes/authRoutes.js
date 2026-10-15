@@ -18,20 +18,20 @@ const generateToken = (id) => {
 // @desc    Check if admin exists
 // @route   GET /api/auth/check-admin
 // @access  Public
-router.get('/check-admin', async (req, res) => {
+router.get('/check-admin', async (req, res, next) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.json({
+      adminExists: false,
+      dbConnected: false,
+      message: 'Database connection is still initializing or failed.',
+    });
+  }
+
   try {
-    // Check DB Connection
-    if (mongoose.connection.readyState !== 1) {
-      return res.json({ 
-        adminExists: false, 
-        dbConnected: false,
-        message: 'Database connection is still initializing or failed.' 
-      });
-    }
     const adminExists = await User.findOne({ role: 'admin' });
     res.json({ adminExists: !!adminExists, dbConnected: true });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    next(error);
   }
 });
 

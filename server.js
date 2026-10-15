@@ -22,6 +22,12 @@ dotenv.config({ path: path.join(__dirname, '.env') });
 
 const app = express();
 
+const sanitizeDiagnosticMessage = (message) => String(message || 'Request failed')
+  .replace(/mongodb(?:\+srv)?:\/\/[^\s"'`]+/gi, '[redacted MongoDB URI]')
+  .replace(/\bBearer\s+\S+/gi, 'Bearer [redacted]')
+  .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '[redacted JWT]')
+  .replace(/\b(password|passwd|pwd|secret|token|authorization)\b(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;]+)/gi, '$1$2[redacted]');
+
 // Middleware
 app.use((req, res, next) => {
   req.requestId = randomUUID();
@@ -139,6 +145,7 @@ app.use((error, req, res, next) => {
   const requestPath = (req.originalUrl || req.path).split('?')[0];
   const isProductCatalogRequest = requestPath === '/api/products' || requestPath.startsWith('/api/products/');
   const isCategoryCatalogRequest = requestPath === '/api/categories' || requestPath.startsWith('/api/categories/');
+  const isAdminStatusRequest = requestPath === '/api/auth/check-admin';
   const errorCode = typeof error.code === 'string' && /^[A-Z0-9_]+$/.test(error.code)
     ? error.code
     : typeof error.code === 'number'
@@ -148,10 +155,8 @@ app.use((error, req, res, next) => {
     ? error.path
     : undefined;
   const status = error.status || 500;
-  if (isProductCatalogRequest || isCategoryCatalogRequest) {
-    const safeMessage = status < 500
-      ? error.message
-      : 'Catalog request failed; inspect the server stack trace for the failing operation.';
+  if (isProductCatalogRequest || isCategoryCatalogRequest || isAdminStatusRequest) {
+    const safeMessage = sanitizeDiagnosticMessage(error.message);
     const stackTrace = typeof error.stack === 'string'
       ? error.stack.split('\n').slice(1)
         .filter((line) => /^\s*at\s/.test(line))
@@ -159,7 +164,7 @@ app.use((error, req, res, next) => {
         .slice(0, 20)
       : [];
     console.error(JSON.stringify({
-      event: 'catalog_request_failed',
+      event: isAdminStatusRequest ? 'admin_status_request_failed' : 'catalog_request_failed',
       requestId: req.requestId,
       path: requestPath,
       method: req.method,
@@ -169,7 +174,9 @@ app.use((error, req, res, next) => {
       stackTrace,
       ...(errorCode === undefined ? {} : { errorCode }),
       ...(errorPath ? { errorPath } : {}),
-      collection: isProductCatalogRequest ? Product.collection.name : Category.collection.name,
+      ...(isAdminStatusRequest
+        ? { collection: User.collection.name }
+        : { collection: isProductCatalogRequest ? Product.collection.name : Category.collection.name }),
     }));
   } else {
     console.error(JSON.stringify({
