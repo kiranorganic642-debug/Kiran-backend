@@ -288,7 +288,7 @@ const uploadProductImages = async (req, res, next) => {
     res.status(201).json(incoming.map((image, index) => ({
       ...image,
       id: String(product.images[product.images.length - incoming.length + index]._id),
-      url: `${req.protocol}://${req.get('host')}${image.url}`,
+      url: image.url,
     })));
   } catch (error) {
     next(error);
