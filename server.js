@@ -1,6 +1,7 @@
 const express = require('express');
 const dotenv = require('dotenv');
 const path = require('path');
+const { randomUUID } = require('crypto');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const connectDB = require('./config/db');
@@ -22,6 +23,11 @@ dotenv.config({ path: path.join(__dirname, '.env') });
 const app = express();
 
 // Middleware
+app.use((req, res, next) => {
+  req.requestId = randomUUID();
+  res.setHeader('X-Request-ID', req.requestId);
+  next();
+});
 app.use(express.json({ limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
 
@@ -130,9 +136,56 @@ app.get('/api/admin/dashboard', protect, admin, async (req, res, next) => {
 app.use('/api/admin', adminRoutes);
 
 app.use((error, req, res, next) => {
-  console.error('Request failed:', error.message);
+  const requestPath = (req.originalUrl || req.path).split('?')[0];
+  const isProductCatalogRequest = requestPath === '/api/products' || requestPath.startsWith('/api/products/');
+  const isCategoryCatalogRequest = requestPath === '/api/categories' || requestPath.startsWith('/api/categories/');
+  const errorCode = typeof error.code === 'string' && /^[A-Z0-9_]+$/.test(error.code)
+    ? error.code
+    : typeof error.code === 'number'
+      ? error.code
+      : undefined;
+  const errorPath = typeof error.path === 'string' && /^[A-Za-z0-9_.]+$/.test(error.path)
+    ? error.path
+    : undefined;
+  const status = error.status || 500;
+  if (isProductCatalogRequest || isCategoryCatalogRequest) {
+    const safeMessage = status < 500
+      ? error.message
+      : 'Catalog request failed; inspect the server stack trace for the failing operation.';
+    const stackTrace = typeof error.stack === 'string'
+      ? error.stack.split('\n').slice(1)
+        .filter((line) => /^\s*at\s/.test(line))
+        .map((line) => line.trim())
+        .slice(0, 20)
+      : [];
+    console.error(JSON.stringify({
+      event: 'catalog_request_failed',
+      requestId: req.requestId,
+      path: requestPath,
+      method: req.method,
+      status,
+      errorName: error.name || 'Error',
+      message: safeMessage,
+      stackTrace,
+      ...(errorCode === undefined ? {} : { errorCode }),
+      ...(errorPath ? { errorPath } : {}),
+      collection: isProductCatalogRequest ? Product.collection.name : Category.collection.name,
+    }));
+  } else {
+    console.error(JSON.stringify({
+      event: 'request_failed',
+      requestId: req.requestId,
+      method: req.method,
+      route: requestPath,
+      status,
+      errorName: error.name || 'Error',
+      ...(errorCode === undefined ? {} : { errorCode }),
+      ...(errorPath ? { errorPath } : {}),
+    }));
+  }
   res.status(error.status || 500).json({
     message: error.status ? error.message : 'Internal server error',
+    requestId: req.requestId,
   });
 });
 

@@ -15,8 +15,9 @@ server-only `.env` file before starting it.
 - `npm run sync:products` — preview the frontend catalog import without writes.
 - `node scripts/syncFrontendProducts.js` — compare the frontend catalog against
   MongoDB without writes.
-- `node scripts/syncFrontendProducts.js --apply --backup` — back up existing
-  product and category documents, then import missing frontend products.
+- `node scripts/syncFrontendProducts.js --apply --backup --confirm-production`
+  — after reviewing a dry-run, back up existing product and category documents,
+  then add missing frontend products and categories without overwriting matches.
 - `npm run seed:admin` — provision the admin selected by
   `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD` in the server environment.
 
@@ -56,6 +57,16 @@ MongoDB Atlas URI; keep it and all other secrets on the backend only.
 The service connects to the database before listening and reports database
 readiness at `GET /health`. Configure `MONGO_URI`, JWT and Cloudinary credentials
 in Render; a local `.env` file does not update Render's environment.
+
+The catalog importer is additive and requires all three explicit flags
+(`--apply --backup --confirm-production`) before it can write. Run
+`npm run sync:products` against the intended database first and review its
+database name, collection counts, duplicate/inactive matches, and image mapping
+report. The importer stores approved image URLs under
+`https://kiransorganic.com/product-images/`; the combined frontend deployment
+build places the corresponding original image files at that path. Source images
+marked for manual review are not attached to products until a correct image is
+available.
 
 ### Public website and admin static files
 

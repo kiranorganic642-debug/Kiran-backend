@@ -1,6 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const mongoose = require('mongoose');
 const { protect } = require('../middleware/authMiddleware');
 const { admin } = require('../middleware/adminMiddleware');
 const { upload } = require('../middleware/uploadMiddleware');
@@ -82,9 +83,38 @@ const categoryOutput = (category, productCount = 0) => {
 };
 
 const getListParams = (req) => {
-  const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
-  const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 100));
+  const parsePositiveInteger = (value, name, defaultValue, maxValue = Number.MAX_SAFE_INTEGER) => {
+    if (value === undefined) return defaultValue;
+    if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) {
+      const error = new Error(`${name} must be a positive integer`);
+      error.status = 400;
+      throw error;
+    }
+    const number = Number(value);
+    if (!Number.isSafeInteger(number) || number > maxValue) {
+      const error = new Error(`${name} is outside the supported range`);
+      error.status = 400;
+      throw error;
+    }
+    return number;
+  };
+
+  const limit = parsePositiveInteger(req.query.limit, 'limit', 100, 100);
+  const maxPage = Math.floor(2147483647 / limit) + 1;
+  const page = parsePositiveInteger(req.query.page, 'page', 1, maxPage);
+  const offset = (page - 1) * limit;
   const filter = {};
+
+  if (req.query.status !== undefined && !['all', 'active', 'inactive'].includes(req.query.status)) {
+    const error = new Error('status must be all, active, or inactive');
+    error.status = 400;
+    throw error;
+  }
+  if (req.query.availability !== undefined && !['all', 'available', 'unavailable'].includes(req.query.availability)) {
+    const error = new Error('availability must be all, available, or unavailable');
+    error.status = 400;
+    throw error;
+  }
 
   if (!req.user || req.user.role !== 'admin' || req.query.status === 'active') filter.active = true;
   if (req.query.status === 'inactive') filter.active = false;
@@ -93,6 +123,11 @@ const getListParams = (req) => {
   }
   if (req.query.availability === 'unavailable') filter.stock = { $lte: 0 };
 
+  if (req.query.search !== undefined && typeof req.query.search !== 'string') {
+    const error = new Error('search must be a string');
+    error.status = 400;
+    throw error;
+  }
   const search = String(req.query.search || '').trim();
   if (search) {
     const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -102,7 +137,14 @@ const getListParams = (req) => {
       { categoryName: { $regex: escaped, $options: 'i' } },
     ];
   }
-  if (req.query.categoryId) filter.categoryId = req.query.categoryId;
+  if (req.query.categoryId !== undefined) {
+    if (typeof req.query.categoryId !== 'string' || !mongoose.isValidObjectId(req.query.categoryId)) {
+      const error = new Error('categoryId must be a valid category ID');
+      error.status = 400;
+      throw error;
+    }
+    filter.categoryId = req.query.categoryId;
+  }
 
   const sorts = {
     newest: { createdAt: -1, _id: -1 },
@@ -113,17 +155,22 @@ const getListParams = (req) => {
     'price-desc': { price: -1 },
     'stock-asc': { stock: 1 },
   };
-  return { page, limit, filter, sort: sorts[req.query.sort] || sorts.newest };
+  if (req.query.sort !== undefined && typeof req.query.sort !== 'string') {
+    const error = new Error('sort must be a string');
+    error.status = 400;
+    throw error;
+  }
+  return { page, limit, offset, filter, sort: sorts[req.query.sort] || sorts.newest };
 };
 
 const listProducts = async (req, res, next) => {
   try {
-    const { page, limit, filter, sort } = getListParams(req);
+    const { page, limit, offset, filter, sort } = getListParams(req);
     const [products, total] = await Promise.all([
       Product.find(filter)
         .populate('categoryId', 'name slug')
         .sort(sort)
-        .skip((page - 1) * limit)
+        .skip(offset)
         .limit(limit)
         .lean(),
       Product.countDocuments(filter),

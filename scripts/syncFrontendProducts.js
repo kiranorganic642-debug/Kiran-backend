@@ -40,11 +40,11 @@ const serialize = (value) => JSON.stringify(value, (_key, field) => (
 
 const run = async () => {
   const apply = process.argv.includes('--apply');
-  if (apply && !process.argv.includes('--backup')) {
-    throw new Error('Applying changes requires --backup so current product and category documents are saved first.');
+  if (apply && (!process.argv.includes('--backup') || !process.argv.includes('--confirm-production'))) {
+    throw new Error('Applying changes requires --backup and --confirm-production after reviewing a dry-run report.');
   }
 
-  const { allProducts } = await loadCatalog();
+  const { allProducts, productImageReview = {} } = await loadCatalog();
   const categoryNames = [...new Set(allProducts.map((item) => String(item.category || '').trim()).filter(Boolean))];
   const missingImages = allProducts.flatMap((product) => {
     const imagePath = String(product.image || '');
@@ -59,11 +59,11 @@ const run = async () => {
       : [{ legacyId: product.id, name: product.name, image: imagePath }];
   });
   const manualReview = allProducts
-    .filter((product) => product.id === 42 && decodeURIComponent(String(product.image || '')).includes('organic-sea-buckthorn-juice'))
+    .filter((product) => productImageReview[product.id])
     .map((product) => ({
       legacyId: product.id,
       name: product.name,
-      reason: 'Frontend catalog explicitly reuses the sea buckthorn juice image for capsules.',
+      reason: productImageReview[product.id],
       image: product.image,
     }));
 
@@ -72,6 +72,13 @@ const run = async () => {
       frontendProductCount: allProducts.length,
       frontendCategoryCount: categoryNames.length,
       categories: categoryNames,
+      imageMappings: allProducts
+        .filter((product) => !productImageReview[product.id])
+        .map((product) => ({
+          legacyId: product.id,
+          name: product.name,
+          image: `https://kiransorganic.com/product-images/${encodeURIComponent(path.basename(decodeURIComponent(String(product.image || ''))))}`,
+        })),
       duplicateIds: allProducts.map((product) => product.id).filter((id, index, ids) => ids.indexOf(id) !== index),
       missingImages,
       manualReview,
@@ -100,11 +107,15 @@ const run = async () => {
 
   const report = {
     mode: apply ? 'apply' : 'dry-run',
+    databaseName: mongoose.connection.name,
+    productCollection: Product.collection.name,
+    categoryCollection: Category.collection.name,
     frontendProductCount: allProducts.length,
     databaseProductCountBefore: existingProducts.length,
     databaseCategoryCountBefore: existingCategories.length,
     categoriesToAdd: [],
     productsToAdd: [],
+    imageMappings: [],
     duplicatesSkipped: [],
     updated: 0,
     missingImages,
@@ -120,6 +131,7 @@ const run = async () => {
     let category = existingCategories.find((item) => item.slug === slug || item.legacyName === name);
     if (!category && !knownCategories.has(slug)) {
       report.categoriesToAdd.push({ name, slug });
+      knownCategories.add(slug);
       if (apply) {
         category = await Category.findOneAndUpdate(
           { slug },
@@ -142,7 +154,16 @@ const run = async () => {
       const imageFile = relativeAsset
         ? path.resolve(frontendDir, 'src', 'assets', 'Product', relativeAsset)
         : '';
-      const imageExists = Boolean(imageFile && imageFile.startsWith(path.resolve(frontendDir, 'src', 'assets', 'Product') + path.sep) && fs.existsSync(imageFile));
+      const assetDirectory = path.resolve(frontendDir, 'src', 'assets', 'Product') + path.sep;
+      const imageExists = Boolean(
+        imageFile
+        && imageFile.startsWith(assetDirectory)
+        && fs.existsSync(imageFile)
+        && !productImageReview[source.id]
+      );
+      const imageUrl = imageExists
+        ? `https://kiransorganic.com/product-images/${encodeURIComponent(path.basename(imageFile))}`
+        : '';
       const categoryName = String(source.category || '').trim();
       const categorySlug = slugify(categoryName);
       let category = categoryByName.get(categoryName);
@@ -174,6 +195,7 @@ const run = async () => {
           name: source.name,
           existingId: String(existing._id),
           existingLegacyId: existing.legacyId ?? null,
+          existingActive: existing.active !== false,
           reason: existing.legacyId === Number(source.id) ? 'legacy-id' : 'slug-or-sku',
         });
         continue;
@@ -198,12 +220,21 @@ const run = async () => {
         active: true,
         featured: false,
         defaultSize: source.defaultSize || '',
-        thumbnail: imageExists ? imagePath : '',
-        images: imageExists ? [{ url: imagePath, altText: source.name, isPrimary: true, sortOrder: 0 }] : [],
+        thumbnail: imageUrl,
+        images: imageExists ? [{ url: imageUrl, altText: source.name, isPrimary: true, sortOrder: 0 }] : [],
         variants: variantData,
         isComingSoon: Boolean(source.isComingSoon),
       };
-      report.productsToAdd.push({ legacyId: source.id, name: source.name, category: categoryName });
+      report.productsToAdd.push({
+        legacyId: source.id,
+        name: source.name,
+        category: categoryName,
+        image: imageUrl || null,
+      });
+      if (imageUrl) {
+        report.imageMappings.push({ legacyId: source.id, name: source.name, image: imageUrl });
+      }
+      knownSlugs.add(slug);
       if (apply) {
         await Product.findOneAndUpdate(
           matchFilter,
@@ -226,7 +257,9 @@ const run = async () => {
 
 run()
   .catch((error) => {
-    console.error(`Product synchronization failed: ${error.message}`);
+    const message = String(error.message || 'Unknown error')
+      .replace(/mongodb(?:\+srv)?:\/\/[^\s]+/gi, '[redacted MongoDB URI]');
+    console.error(`Product synchronization failed: ${message}`);
     process.exitCode = 1;
   })
   .finally(async () => {
