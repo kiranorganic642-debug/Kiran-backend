@@ -198,36 +198,40 @@ app.use((error, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 
-if (!process.env.JWT_SECRET) {
-  throw new Error('JWT_SECRET is required');
+if (require.main === module) {
+  if (!process.env.JWT_SECRET) {
+    throw new Error('JWT_SECRET is required');
+  }
+
+  connectDB()
+    .then(() => {
+      const server = app.listen(PORT, '0.0.0.0', () => {
+        console.log(`Server running on port ${PORT}`);
+      });
+      server.on('error', (error) => {
+        if (error.code === 'EADDRINUSE') {
+          console.error(`Server failed to listen: port ${PORT} is already in use. Check for another backend instance before starting a new one.`);
+        } else {
+          console.error(`Server failed to listen [${error.code || 'unknown'}].`);
+        }
+
+        mongoose.disconnect().then(
+          () => { process.exitCode = 1; },
+          () => {
+            console.error('MongoDB cleanup failed after the server listener error.');
+            process.exitCode = 1;
+          }
+        );
+      });
+    })
+    .catch((error) => {
+      const category = error.category || 'backend startup failure';
+      const message = error.category
+        ? error.message
+        : 'Check the backend environment and startup configuration.';
+      console.error(`Server startup failed [${category}]. ${message}`);
+      process.exitCode = 1;
+    });
 }
 
-connectDB()
-  .then(() => {
-    const server = app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Server running on port ${PORT}`);
-    });
-    server.on('error', (error) => {
-      if (error.code === 'EADDRINUSE') {
-        console.error(`Server failed to listen: port ${PORT} is already in use. Check for another backend instance before starting a new one.`);
-      } else {
-        console.error(`Server failed to listen [${error.code || 'unknown'}].`);
-      }
-
-      mongoose.disconnect().then(
-        () => { process.exitCode = 1; },
-        () => {
-          console.error('MongoDB cleanup failed after the server listener error.');
-          process.exitCode = 1;
-        }
-      );
-    });
-  })
-  .catch((error) => {
-    const category = error.category || 'backend startup failure';
-    const message = error.category
-      ? error.message
-      : 'Check the backend environment and startup configuration.';
-    console.error(`Server startup failed [${category}]. ${message}`);
-    process.exitCode = 1;
-  });
+module.exports = app;

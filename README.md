@@ -9,6 +9,8 @@ server-only `.env` file before starting it.
 - `npm run dev` — start the MongoDB-backed server with Node watch mode.
 - `npm start` — start the MongoDB-backed server.
 - `npm run build` — syntax-check the active JavaScript server and routes.
+- `npm test` — exercise authenticated order creation, owner-only order listing,
+  and admin status updates using mocked model methods without database writes.
 - `node scripts/syncFrontendProducts.js --catalog-only` — report frontend
   products, duplicate legacy IDs, missing local image files and known image
   review flags without connecting to MongoDB.
@@ -32,6 +34,13 @@ Do not use its old scripts or generated client when working on this service.
 Product synchronization is additive and idempotent. It never deletes database
 records or overwrites an existing match. The `--backup` option saves current
 product and category documents before applying inserts.
+
+Order checkout persists through `POST /api/orders` using the signed-in customer
+token. `GET /api/orders` returns only orders linked to that account, plus
+legacy unlinked orders with the same account email. Admin updates use
+`PATCH /api/admin/orders/:id/status` and modify `orderStatus` without changing
+`paymentStatus`; customer order history is fetched fresh from the API rather
+than browser localStorage.
 
 ## Production deployment
 
@@ -57,16 +66,22 @@ MongoDB Atlas URI; keep it and all other secrets on the backend only.
 The service connects to the database before listening and reports database
 readiness at `GET /health`. Configure `MONGO_URI`, JWT and Cloudinary credentials
 in Render; a local `.env` file does not update Render's environment.
+After deploying backend changes, redeploy the Render service. Verify that
+`GET /api/orders` returns `401` without a bearer token (rather than `404`);
+customer requests must include the signed-in customer's bearer token.
 
 The catalog importer is additive and requires all three explicit flags
 (`--apply --backup --confirm-production`) before it can write. Run
 `npm run sync:products` against the intended database first and review its
 database name, collection counts, duplicate/inactive matches, and image mapping
 report. The importer stores approved image URLs under
-`https://kiransorganic.com/product-images/`; the combined frontend deployment
-build places the corresponding original image files at that path. Source images
-marked for manual review are not attached to products until a correct image is
-available.
+`https://kiransorganic.com/product-images/`; API responses also convert legacy
+`/src/assets/Product/...` paths to website-root `/product-images/...` paths
+without changing database records. The combined frontend deployment build
+places and verifies the corresponding original image files at that path. Source
+images marked for manual review are excluded from packaging and are not attached
+to products until a correct image is available. Upload the entire contents of
+`frontend/dist/`, including `product-images/`, to the MilesWeb document root.
 
 ### Public website and admin static files
 

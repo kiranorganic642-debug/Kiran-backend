@@ -7,6 +7,7 @@
     "dev": "node --watch server.js",
     "build": "node --check server.js && node --check routes/catalogRoutes.js && node --check routes/commerceRoutes.js && node --check routes/contentRoutes.js && node --check routes/adminAuthRoutes.js && node --check routes/authRoutes.js && node --check models/Commerce.js && node --check models/Content.js && node --check models/Product.js && node --check models/Category.js && node --check middleware/authMiddleware.js && node --check config/db.js && node --check scripts/provisionAdmin.js && node --check scripts/syncFrontendProducts.js",
     "start": "node server.js",
+    "test": "node --test tests/orders.test.js",
     "seed:admin": "node scripts/provisionAdmin.js",
     "sync:products": "node scripts/syncFrontendProducts.js"
   },

@@ -52,12 +52,28 @@ const makeOrderNumber = () => {
   return `KIR-${day}-${randomInt(100000, 1000000)}`;
 };
 
+publicOrders.use(protect);
+publicOrders.get('/', async (req, res, next) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    const filter = {
+      $or: [
+        { userId: req.user._id },
+        { userId: null, 'customer.email': req.user.email },
+      ],
+    };
+    const orders = await Order.find(filter).sort({ createdAt: -1 });
+    res.json({ orders: orders.map(orderOutput) });
+  } catch (error) {
+    next(error);
+  }
+});
+
 publicOrders.post('/', async (req, res, next) => {
   try {
     const customer = req.body.customer || {};
     const fullName = String(customer.fullName || req.body.customerName || '').trim();
     const phone = String(customer.phone || req.body.customerPhone || '').trim();
-    const email = String(customer.email || req.body.customerEmail || '').trim().toLowerCase();
     if (!fullName || !phone) return res.status(400).json({ message: 'Customer name and phone are required' });
     if (!Array.isArray(req.body.items) || !req.body.items.length) {
       return res.status(400).json({ message: 'At least one order item is required' });
@@ -103,13 +119,14 @@ publicOrders.post('/', async (req, res, next) => {
       orderNumber: makeOrderNumber(),
       customer: {
         fullName,
-        email,
+        email: req.user.email,
         phone,
         address: String(customer.address || req.body.address || ''),
         city: String(customer.city || req.body.city || ''),
         state: String(customer.state || req.body.state || ''),
         pinCode: String(customer.pinCode || req.body.pinCode || ''),
       },
+      userId: req.user._id,
       items: orderItems,
       subtotal,
       shipping,

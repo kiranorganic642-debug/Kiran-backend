@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const orderSchema = new mongoose.Schema(
   {
     orderNumber: { type: String, required: true },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     customer: {
       fullName: { type: String, required: true },
       email: { type: String, lowercase: true, trim: true, default: '' },
@@ -38,6 +39,7 @@ const orderSchema = new mongoose.Schema(
   { timestamps: true }
 );
 orderSchema.index({ 'customer.email': 1, createdAt: -1 });
+orderSchema.index({ userId: 1, createdAt: -1 });
 orderSchema.index({ orderStatus: 1, createdAt: -1 });
 orderSchema.index({ orderNumber: 1 });
 

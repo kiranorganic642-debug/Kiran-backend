@@ -13,6 +13,7 @@ const adminProducts = express.Router();
 const publicCategories = express.Router();
 const adminCategories = express.Router();
 const productAssetsDirectory = path.resolve(__dirname, '../../frontend/src/assets/Product');
+const unapprovedImageLegacyIds = new Set([42]);
 
 const slugify = (value) => value
   .toLowerCase()
@@ -23,9 +24,12 @@ const slugify = (value) => value
 const asProduct = (product, origin) => {
   const record = product.toObject ? product.toObject() : product;
   const primary = record.images?.find((image) => image.isPrimary) || record.images?.[0];
-  const localImageUrl = (url) => (
-    url && url.startsWith('/src/assets/Product/')
-      ? `${origin}/api/catalog-assets/${encodeURIComponent(decodeURIComponent(path.basename(url)))}`
+  const hideUnapprovedSourceImage = unapprovedImageLegacyIds.has(record.legacyId);
+  const productImageUrl = (url) => (
+    hideUnapprovedSourceImage && url?.startsWith('/src/assets/Product/')
+      ? ''
+      : url && url.startsWith('/src/assets/Product/')
+      ? `/product-images/${encodeURIComponent(decodeURIComponent(path.basename(url)))}`
       : url && url.startsWith('/uploads/')
       ? `${origin}${url}`
       : url
@@ -44,12 +48,12 @@ const asProduct = (product, origin) => {
     categoryId: record.categoryId && typeof record.categoryId === 'object'
       ? String(record.categoryId._id)
       : record.categoryId ? String(record.categoryId) : '',
-    image: localImageUrl(record.thumbnail || primary?.url || ''),
-    thumbnail: localImageUrl(record.thumbnail || primary?.url || ''),
+    image: productImageUrl(record.thumbnail || primary?.url || ''),
+    thumbnail: productImageUrl(record.thumbnail || primary?.url || ''),
     images: (record.images || []).map((image) => ({
       ...image,
       id: String(image._id),
-      url: localImageUrl(image.url),
+      url: productImageUrl(image.url),
     })),
     variants: (record.variants || []).map((variant) => ({
       ...variant,
